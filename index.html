@@ -102,6 +102,13 @@
   .deploy-steps li::before{content:counter(ds);min-width:20px;height:20px;border-radius:50%;background:rgba(255,255,255,.25);color:white;font-size:10px;font-weight:700;display:flex;align-items:center;justify-content:center;margin-top:1px;flex-shrink:0;}
   .deploy-steps code{background:rgba(255,255,255,.2);padding:1px 5px;border-radius:4px;font-family:'Courier New',monospace;font-size:11px;}
   .deploy-toggle{font-size:11px;font-weight:600;color:var(--c-accent);background:white;border:none;padding:5px 10px;border-radius:6px;cursor:pointer;margin-top:10px;}
+
+  .debug-box{margin:14px 0 0;padding:12px;border:1px solid var(--c-border);border-radius:12px;background:#faf9f6}
+  .debug-head{display:flex;justify-content:space-between;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:8px}
+  .debug-summary{font-size:12px;color:var(--c-text-muted);margin-bottom:8px;line-height:1.55}
+  .debug-pre{max-height:280px;overflow:auto;background:#111827;color:#e5e7eb;border-radius:10px;padding:12px;font-size:11px;line-height:1.45;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap}
+  .debug-chip{display:inline-block;padding:4px 8px;border-radius:999px;background:#eef2ff;color:#3730a3;font-size:11px;font-weight:600;margin:0 6px 6px 0}
+
 </style>
 </head>
 <body>
@@ -215,6 +222,19 @@
         <div class="section-divider-line"></div>
       </div>
       <div class="notice notice-warn hidden" id="unmatchedNotice"></div>
+      <div id="debugPanel" class="debug-box hidden">
+        <div class="debug-head">
+          <div>
+            <strong>Parser debug</strong>
+            <div class="debug-summary" id="debugSummary"></div>
+          </div>
+          <div class="btn-group" style="gap:8px;">
+            <button class="btn btn-secondary btn-sm" onclick="toggleDebugLog()">Show / Hide Log</button>
+            <button class="btn btn-secondary btn-sm" onclick="downloadDebugLog()">Download Debug JSON</button>
+          </div>
+        </div>
+        <div class="debug-pre hidden" id="debugOutput"></div>
+      </div>
       <div class="table-wrapper">
         <div class="table-wrapper-inner">
           <table class="tender-table" id="tenderTable">
@@ -539,6 +559,7 @@ const state = {
   excelTenders: [],
   matchedTenders: [],
   bulletinAwards: [],
+  debug: { enabled: true, visible: false, mode: 'tenders', entries: [] },
 };
 
 // Set default date
@@ -574,6 +595,163 @@ function switchMode(mode) {
   }
 }
 
+
+// ─── Debug & Matching Helpers ────────────────────────────────────────────────
+function resetDebugLog(mode) {
+  state.debug = { enabled: true, visible: false, mode: mode || state.mode, entries: [] };
+}
+
+function debugLog(stage, title, reason, extra = {}) {
+  if (!state.debug || !state.debug.enabled) return;
+  state.debug.entries.push({
+    stage,
+    title: (title || '').slice(0, 220),
+    reason,
+    ...extra,
+  });
+}
+
+function renderDebugPanel() {
+  const panel = document.getElementById('debugPanel');
+  const summary = document.getElementById('debugSummary');
+  const output = document.getElementById('debugOutput');
+  if (!panel || !summary || !output) return;
+
+  const entries = (state.debug && state.debug.entries) ? state.debug.entries : [];
+  if (!entries.length) {
+    panel.classList.add('hidden');
+    output.classList.add('hidden');
+    output.textContent = '';
+    summary.textContent = '';
+    return;
+  }
+
+  panel.classList.remove('hidden');
+
+  const reasonCounts = {};
+  entries.forEach(e => reasonCounts[e.reason] = (reasonCounts[e.reason] || 0) + 1);
+  const topReasons = Object.entries(reasonCounts)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8)
+    .map(([reason, count]) => `<span class="debug-chip">${escHtml(reason)}: ${count}</span>`)
+    .join('');
+
+  const picked = entries.filter(e => /PICK|MATCHED/.test(e.reason)).length;
+  summary.innerHTML = `
+    ${state.debug.mode === 'awards' ? 'Awards' : 'Tenders'} parser recorded ${entries.length} decisions.
+    <span style="display:block;margin-top:6px;">Accepted / matched decisions: ${picked}</span>
+    <div style="margin-top:8px;">${topReasons}</div>
+  `;
+
+  const lines = entries.slice(0, 350).map((e, idx) => {
+    const extras = Object.entries(e)
+      .filter(([k, v]) => !['stage','title','reason'].includes(k) && v !== '' && v !== null && v !== undefined)
+      .map(([k, v]) => `${k}=${typeof v === 'object' ? JSON.stringify(v) : v}`)
+      .join(' | ');
+    return `[${idx + 1}] ${e.stage} | ${e.reason} | ${e.title || '(no title)'}${extras ? ' | ' + extras : ''}`;
+  });
+
+  output.textContent = lines.join('\n');
+  output.classList.toggle('hidden', !state.debug.visible);
+}
+
+function toggleDebugLog() {
+  if (!state.debug) return;
+  state.debug.visible = !state.debug.visible;
+  renderDebugPanel();
+}
+
+function downloadDebugLog() {
+  const entries = (state.debug && state.debug.entries) ? state.debug.entries : [];
+  if (!entries.length) {
+    alert('No debug log available yet. Parse a bulletin first.');
+    return;
+  }
+  const blob = new Blob([JSON.stringify({
+    mode: state.debug.mode,
+    date: state.date,
+    generatedAt: new Date().toISOString(),
+    entries
+  }, null, 2)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `parser_debug_${state.debug.mode}_${state.date || 'today'}.json`;
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => {
+    URL.revokeObjectURL(a.href);
+    a.remove();
+  }, 0);
+}
+
+function normalizeLabel(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/\u00a0/g, ' ')
+    .replace(/\s+/g, '')
+    .replace(/[:\-–—]/g, '')
+    .trim();
+}
+
+function normalizeForMatch(s) {
+  return String(s || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\b(contract|framework|services|service|works|work|programme|program|lot|supply|maintenance|housing|homes|properties|property)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenSet(s) {
+  return new Set(normalizeForMatch(s).split(' ').filter(w => w.length > 2));
+}
+
+function overlapScore(a, b) {
+  const A = tokenSet(a), B = tokenSet(b);
+  if (!A.size || !B.size) return 0;
+  let common = 0;
+  for (const x of A) if (B.has(x)) common++;
+  return common / Math.max(A.size, B.size);
+}
+
+function combinedMatchScore(bulletin, excel) {
+  const titleScore = overlapScore(bulletin.title, excel.title);
+  const clientScore = overlapScore(bulletin.client, excel.client || '');
+  const ptScore = (bulletin.pt && excel.pt && normalizeForMatch(bulletin.pt) === normalizeForMatch(excel.pt)) ? 1 : 0;
+  return (titleScore * 0.75) + (clientScore * 0.15) + (ptScore * 0.10);
+}
+
+function scoreTenderAnchor(link) {
+  const style = (link.getAttribute('style') || '').toLowerCase();
+  const cls = (link.getAttribute('class') || '').toLowerCase();
+  const text = decodeHtmlEntities(link.textContent.trim());
+  let score = 0;
+  if (cls.includes('headtext')) score += 2;
+  if (style.includes('#334d5c')) score += 3;
+  if (style.includes('22px')) score += 2;
+  if (text.length > 8) score += 1;
+  if (style.includes('#37a000')) score -= 6;
+  if (style.includes('#45b29d')) score -= 8;
+  if (/contracts awarded|minutes|materials|other daily tenders/i.test(text)) score -= 4;
+  return score;
+}
+
+function scoreAwardAnchor(link) {
+  const style = (link.getAttribute('style') || '').toLowerCase();
+  const cls = (link.getAttribute('class') || '').toLowerCase();
+  const text = decodeHtmlEntities(link.textContent.trim());
+  let score = 0;
+  if (style.includes('#444')) score += 3;
+  if (style.includes('20px')) score += 2;
+  if (cls.includes('headtext')) score += 1;
+  if (text.length > 6) score += 1;
+  if (style.includes('#45b29d')) score -= 8;
+  if (cls.includes('newsheadings')) score -= 5;
+  if (/modification notice|cancelled/i.test(text)) score -= 4;
+  return score;
+}
+
 // ─── Awards HTML Parser ───────────────────────────────────────────────────────
 function extractAwardsFromHTML(html) {
   const parser = new DOMParser();
@@ -584,124 +762,134 @@ function extractAwardsFromHTML(html) {
   let inAwardsSection = false;
 
   for (const link of doc.querySelectorAll('a')) {
-    const style = link.getAttribute('style') || '';
-    const cls   = link.getAttribute('class') || '';
+    const style = (link.getAttribute('style') || '').toLowerCase();
+    const cls   = (link.getAttribute('class') || '').toLowerCase();
+    const linkText = decodeHtmlEntities(link.textContent.trim());
 
-    // #45b29d = Contracts Awarded section header — start collecting
-    if (style.includes('#45b29d')) { inAwardsSection = true; continue; }
+    if (style.includes('#45b29d') && /contracts awarded/i.test(linkText)) {
+      inAwardsSection = true;
+      debugLog('awards-scan', linkText, 'ENTER_AWARDS_SECTION');
+      continue;
+    }
     if (!inAwardsSection) continue;
 
-    // newsHeadings class = Minutes section header — stop
-    if (cls.includes('newsHeadings')) break;
+    if (cls.includes('newsheadings')) {
+      debugLog('awards-scan', linkText, 'STOP_AT_NEXT_SECTION');
+      break;
+    }
 
-    // Award entry anchor: authority link has color:#444 and font-size:20px
-    if (!style.includes('#444') || !style.includes('20px')) continue;
+    const score = scoreAwardAnchor(link);
+    if (score < 5) {
+      if (linkText && (score >= 2 || style || cls)) {
+        debugLog('awards-scan', linkText, 'SKIP_LOW_SCORE', { score, style, cls });
+      }
+      continue;
+    }
 
-    // Navigate up to the colspan outer td
     const outerTd = link.closest('td[colspan]');
-    if (!outerTd) continue;
+    if (!outerTd) {
+      debugLog('awards-scan', linkText, 'SKIP_NO_OUTER_TD', { score });
+      continue;
+    }
 
-    // Get title from the left 410-wide table — it's the largest text block
     const leftTable = Array.from(outerTd.querySelectorAll('table')).find(t => {
-      const w = t.getAttribute('width') || t.style.width || '';
+      const w = (t.getAttribute('width') || t.style.width || '').toString().trim();
       return w === '410';
     });
 
-    // Title: look for the headText-style link or largest font text in left table
     let title = '';
     if (leftTable) {
-      // Try anchor with large font first
       const titleLink = Array.from(leftTable.querySelectorAll('a')).find(a => {
-        const s = a.getAttribute('style') || '';
-        return s.includes('22px') || s.includes('18px') || s.includes('20px');
+        const s = (a.getAttribute('style') || '').toLowerCase();
+        return s.includes('22px') || s.includes('20px') || s.includes('18px');
       });
       if (titleLink) {
         title = decodeHtmlEntities(titleLink.textContent.trim());
       } else {
-        // Fallback: get the first substantial paragraph text
-        const paras = leftTable.querySelectorAll('p, td');
-        for (const p of paras) {
-          const t = p.textContent.trim();
-          if (t.length > 10 && !t.includes('@') && !t.includes('http')) {
-            title = decodeHtmlEntities(t);
+        const textNodes = Array.from(leftTable.querySelectorAll('p, td, div'));
+        for (const node of textNodes) {
+          const t = decodeHtmlEntities(node.textContent.trim());
+          if (t.length > 10 && !t.includes('@') && !/^sector:/i.test(t)) {
+            title = t;
             break;
           }
         }
       }
     }
 
-    // If no title found from left table, use the text near the authority link
     if (!title) {
       const row = link.closest('tr');
       if (row) {
-        const allText = row.textContent.replace(link.textContent, '').trim();
-        title = decodeHtmlEntities(allText.split('\n')[0].trim());
+        const rowText = decodeHtmlEntities(row.textContent.replace(link.textContent, '').trim());
+        title = rowText.split('\n')[0].trim();
       }
     }
 
-    if (!title || title.length < 5) continue;
+    if (!title || title.length < 5) {
+      debugLog('awards-scan', linkText, 'SKIP_NO_TITLE', { score });
+      continue;
+    }
 
-    // Deduplicate by authority+title combo (same authority may have multiple awards)
-    const key = title + '||' + link.textContent.trim();
-    if (seen.has(key)) continue;
+    const key = title + '||' + linkText;
+    if (seen.has(key)) {
+      debugLog('awards-scan', title, 'SKIP_DUPLICATE');
+      continue;
+    }
     seen.add(key);
 
-    if (TITLE_DROP_PREFIXES.some(p => title.startsWith(p))) continue;
+    if (TITLE_DROP_PREFIXES.some(p => title.startsWith(p))) {
+      debugLog('awards-scan', title, 'SKIP_TITLE_PREFIX');
+      continue;
+    }
 
-    // Get meta from 230-wide table
     const metaTable = Array.from(outerTd.querySelectorAll('table')).find(t => {
-      const w = t.getAttribute('width') || t.style.width || '';
+      const w = (t.getAttribute('width') || t.style.width || '').toString().trim();
       return w === '230';
     });
     const metaTd = metaTable
       ? (metaTable.querySelector('td.textAlign') || metaTable.querySelector('[class*="subText"]'))
       : (outerTd.querySelector('td.textAlign') || outerTd.querySelector('[class*="subText"]'));
 
-    const pt     = metaTd ? (htmlGetMeta(metaTd,'PT :') || htmlGetMeta(metaTd,'PT:')).replace(/\s+/g,' ').trim() : '';
-    const rawVal = metaTd ? (htmlGetMeta(metaTd,'Value:') || htmlGetMeta(metaTd,'Value :')).replace(/\s+/g,' ').trim() : '';
-    const winner = metaTd ? (htmlGetMeta(metaTd,'Winner :') || htmlGetMeta(metaTd,'Winner:')).replace(/\s+/g,' ').trim() : '';
-    const tenure = metaTd ? (htmlGetMeta(metaTd,'Tenure :') || htmlGetMeta(metaTd,'Tenure:') || htmlGetMeta(metaTd,'Contract Duration :')).replace(/\s+/g,' ').trim() : '';
-    const location = metaTd ? (htmlGetMeta(metaTd,'Location:') || htmlGetMeta(metaTd,'Location :')).replace(/\s+/g,' ').trim() : '';
+    const pt = metaTd ? htmlGetMeta(metaTd, ['PT :','PT:','Procurement Type:']).replace(/\s+/g,' ').trim() : '';
+    const rawVal = metaTd ? htmlGetMeta(metaTd, ['Value:','Value :','Contract Value:','Estimated Value:']).replace(/\s+/g,' ').trim() : '';
+    const winner = metaTd ? htmlGetMeta(metaTd, ['Winner :','Winner:','Awarded To:','Supplier:']).replace(/\s+/g,' ').trim() : '';
+    const tenure = metaTd ? htmlGetMeta(metaTd, ['Tenure :','Tenure:','Contract Duration :','Contract Duration:','Duration:']).replace(/\s+/g,' ').trim() : '';
+    const location = metaTd ? htmlGetMeta(metaTd, ['Location:','Location :']).replace(/\s+/g,' ').trim() : '';
 
-    // Get sector and description via forward scan
     const outerTr = outerTd.closest('tr');
     let sector = '', description = '';
     if (outerTr) {
       let sibling = outerTr.nextElementSibling;
       while (sibling) {
-        const sectorP = Array.from(sibling.querySelectorAll('p'))
-          .find(p => p.textContent.trim().startsWith('Sector:'));
+        const sectorP = Array.from(sibling.querySelectorAll('p, div, td'))
+          .find(p => /^sector:/i.test(p.textContent.trim()));
         if (sectorP) {
-          sector = sectorP.textContent.trim().replace(/^Sector:\s*/, '').trim();
-          const descP = sibling.querySelector('p.read-more');
-          if (descP) description = decodeHtmlEntities(descP.textContent.replace(/\s+/g, ' ').trim());
+          sector = sectorP.textContent.trim().replace(/^Sector:\s*/i, '').trim();
+          const descNode = sibling.querySelector('p.read-more, div.read-more, p, div');
+          if (descNode) description = decodeHtmlEntities(descNode.textContent.replace(/\s+/g, ' ').trim());
           break;
         }
-        // Stop if we hit next award entry (another #444 20px anchor)
-        const nextEntry = Array.from(sibling.querySelectorAll('a')).find(a => {
-          const s = a.getAttribute('style') || '';
-          return s.includes('#444') && s.includes('20px');
-        });
+        const nextEntry = Array.from(sibling.querySelectorAll('a')).find(a => scoreAwardAnchor(a) >= 5);
         if (nextEntry) break;
         sibling = sibling.nextElementSibling;
       }
     }
 
-    if (!sector || !sector.includes('Housing')) continue;
+    if (!sector || !/housing/i.test(sector)) {
+      debugLog('awards-scan', title, 'SKIP_NON_HOUSING_SECTOR', { sector });
+      continue;
+    }
 
-    const client = decodeHtmlEntities(link.textContent.trim());
+    const client = linkText;
+    let value = rawVal.replace(/&pound;/g, '£').replace(/\u00a3/g, '£');
+    if (value && value !== '-' && !value.startsWith('£')) value = '£' + value;
 
-    let value = rawVal.replace(/&pound;/g, '\xa3').replace(/\u00a3/g, '\xa3');
-    if (value && value !== '-' && !value.startsWith('\xa3')) value = '\xa3' + value;
-
-    console.log('Awards PICK: ' + title.slice(0,50) + ' | client: ' + client + ' | winner: ' + winner);
+    debugLog('awards-scan', title, 'PICK_AWARD', { client, winner, pt, sector });
     awards.push({ srNo: srNo++, title, client, winner, value, tenure, location, pt, sector, description });
   }
 
-  console.log('Awards total picked: ' + awards.length);
   return awards;
 }
-
 
 // ─── Input Tab Switcher ───────────────────────────────────────────────────────
 function switchInputTab(tab) {
@@ -714,22 +902,36 @@ function switchInputTab(tab) {
 // ─── HTML Source Parser ───────────────────────────────────────────────────────
 // IMPORTANT: htmlGetMeta is defined OUTSIDE extractTendersFromHTML to avoid
 // the JS function-declaration hoisting bug when declared inside a for loop.
-function htmlGetMeta(metaTd, label) {
-  for (const div of metaTd.querySelectorAll('div')) {
-    const strong = div.querySelector('strong');
+function htmlGetMeta(metaTd, labels) {
+  const aliases = Array.isArray(labels) ? labels : [labels];
+  const normAliases = aliases.map(normalizeLabel);
+
+  for (const node of metaTd.querySelectorAll('div, p, td')) {
+    const strong = node.querySelector('strong, b');
     if (!strong) continue;
-    if (strong.textContent.trim().toLowerCase() === label.toLowerCase()) {
-      return div.textContent.replace(strong.textContent, '').trim();
+
+    const actual = normalizeLabel(strong.textContent);
+    if (normAliases.includes(actual)) {
+      const remainder = node.textContent.replace(strong.textContent, '').replace(/^[\s:–—-]+/, '').trim();
+      if (remainder) return remainder;
     }
+  }
+
+  const rawText = metaTd.textContent || '';
+  for (const alias of aliases) {
+    const escaped = String(alias || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/\s+/g, '\\s*');
+    const rx = new RegExp(escaped + '\\s*([^\\n\\r]+)', 'i');
+    const match = rawText.match(rx);
+    if (match && match[1]) return match[1].trim();
   }
   return '';
 }
 
 function extractTendersFromHTML(html) {
   // Color key in the bulletin HTML:
-  //   #334d5c at font-size:22px = Tender Alert title link  ← PICK
-  //   #37a000                   = Trade category list link ← SKIP
-  //   #45b29d                   = Contracts Awarded title  ← STOP
+  //   #334d5c at font-size:22px = Tender Alert title link  ← strong signal
+  //   #37a000                   = Trade category list link ← usually skip
+  //   #45b29d                   = Contracts Awarded title  ← stop
 
   const parser = new DOMParser();
   const doc = parser.parseFromString(html, 'text/html');
@@ -737,83 +939,125 @@ function extractTendersFromHTML(html) {
   const seen = new Set();
   let srNo = 1;
 
-  for (const link of doc.querySelectorAll('a.headText')) {
-    const style = link.getAttribute('style') || '';
-
-    if (style.includes('#45b29d')) break;          // hit awards section — stop
-    if (style.includes('#37a000')) continue;        // trade category header — skip
-    if (!style.includes('#334d5c') || !style.includes('22px')) continue; // not a tender title
-
+  for (const link of doc.querySelectorAll('a')) {
+    const style = (link.getAttribute('style') || '').toLowerCase();
+    const cls = (link.getAttribute('class') || '').toLowerCase();
     const title = decodeHtmlEntities(link.textContent.trim());
-    if (!title || title.length < 5) continue;
-    if (seen.has(title)) continue;
+
+    if (style.includes('#45b29d') && /contracts awarded/i.test(title)) {
+      debugLog('tender-scan', title, 'STOP_AT_AWARDS_SECTION');
+      break;
+    }
+
+    const score = scoreTenderAnchor(link);
+
+    if (style.includes('#37a000')) {
+      debugLog('tender-scan', title, 'SKIP_TRADE_CATEGORY', { score, style });
+      continue;
+    }
+
+    if (score < 5) {
+      if (title && (score >= 2 || style || cls)) {
+        debugLog('tender-scan', title, 'SKIP_LOW_SCORE', { score, style, cls });
+      }
+      continue;
+    }
+
+    if (!title || title.length < 5) {
+      debugLog('tender-scan', title, 'SKIP_SHORT_OR_EMPTY');
+      continue;
+    }
+
+    if (seen.has(title)) {
+      debugLog('tender-scan', title, 'SKIP_DUPLICATE');
+      continue;
+    }
     seen.add(title);
 
-    if (TITLE_DROP_PREFIXES.some(p => title.startsWith(p))) continue;
+    if (TITLE_DROP_PREFIXES.some(p => title.startsWith(p))) {
+      debugLog('tender-scan', title, 'SKIP_TITLE_PREFIX');
+      continue;
+    }
 
-    // Navigate to the colspan=3 outer td using closest() — robust against browser
-    // auto-inserting <tbody> elements which would break .parentElement
     const outerTd = link.closest('td[colspan]');
-    if (!outerTd) continue;
+    if (!outerTd) {
+      debugLog('tender-scan', title, 'SKIP_NO_OUTER_TD');
+      continue;
+    }
 
-    // Metadata is in the RIGHT-HAND 230-wide table inside outerTd.
-    // Scope to that specific table to avoid picking up PT from a neighbouring tender.
     const metaTable = Array.from(outerTd.querySelectorAll('table')).find(t => {
-      const w = t.getAttribute('width') || t.style.width || '';
+      const w = (t.getAttribute('width') || t.style.width || '').toString().trim();
       return w === '230';
     });
     const metaTd = metaTable
       ? (metaTable.querySelector('td.textAlign') || metaTable.querySelector('[class*="subText"]'))
       : (outerTd.querySelector('td.textAlign') || outerTd.querySelector('[class*="subText"]'));
-    if (!metaTd) continue;
 
-    const pt       = htmlGetMeta(metaTd, 'PT :').replace(/\s+/g, ' ').trim();
-    const location = htmlGetMeta(metaTd, 'Location:').replace(/\s+/g, ' ').trim();
-    const rawVal   = htmlGetMeta(metaTd, 'Value:').replace(/\s+/g, ' ').trim();
+    if (!metaTd) {
+      debugLog('tender-scan', title, 'SKIP_NO_META_TD');
+      continue;
+    }
 
-    if (!pt) continue;
+    const pt = htmlGetMeta(metaTd, ['PT :','PT:','Procurement Type:']).replace(/\s+/g, ' ').trim();
+    const location = htmlGetMeta(metaTd, ['Location:','Location :']).replace(/\s+/g, ' ').trim();
+    const rawVal = htmlGetMeta(metaTd, ['Value:','Value :','Estimated Value:','Contract Value:']).replace(/\s+/g, ' ').trim();
+    const tenure = htmlGetMeta(metaTd, ['Tenure :','Tenure:','Contract Duration :','Contract Duration:','Duration:']).replace(/\s+/g, ' ').trim();
 
-    // Filter rules — same as PDF parser
+    if (!pt) {
+      debugLog('tender-scan', title, 'SKIP_NO_PT');
+      continue;
+    }
+
     const ptL = pt.toLowerCase();
     if (/soft fm|security personnel|grounds maintenance|pest control|window cleaning|skips|waste management|tree services|water.*legionella/i.test(pt)) {
-      if (!FM_ALLOWED_PT.some(p => ptL.includes(p))) continue;
+      if (!FM_ALLOWED_PT.some(p => ptL.includes(p))) {
+        debugLog('tender-scan', title, 'SKIP_FM_RULE', { pt });
+        continue;
+      }
     }
     if (/architect|surveyor|epc|energy management|fire risk|housing consultant|housing management|insurance|legal|recruitment|it.*software|project management|call handling|social care/i.test(pt)) {
-      if (!PROFSVC_ALLOWED_PT.some(p => ptL.includes(p))) continue;
+      if (!PROFSVC_ALLOWED_PT.some(p => ptL.includes(p))) {
+        debugLog('tender-scan', title, 'SKIP_PROF_SERVICES_RULE', { pt });
+        continue;
+      }
     }
-    if (/^(building materials|other supplies|other daily|electronic payments|all other contracts|electric charging)/i.test(pt)) continue;
+    if (/^(building materials|other supplies|other daily|electronic payments|all other contracts|electric charging)/i.test(pt)) {
+      debugLog('tender-scan', title, 'SKIP_PT_CATEGORY', { pt });
+      continue;
+    }
 
-    // Sector + Description: scan forward through sibling <tr>s until we find
-    // the description row (has a Sector: paragraph). Using forward-scan instead of
-    // nextElementSibling because display-variant rows (hideOnWeb, showoniPad) can
-    // sit between the title+meta row and the description row.
     const outerTr = outerTd.closest('tr');
     let sector = '', description = '';
     if (outerTr) {
       let sibling = outerTr.nextElementSibling;
       while (sibling) {
-        const sectorP = Array.from(sibling.querySelectorAll('p'))
-          .find(p => p.textContent.trim().startsWith('Sector:'));
+        const sectorP = Array.from(sibling.querySelectorAll('p, div, td'))
+          .find(p => /^sector:/i.test(p.textContent.trim()));
         if (sectorP) {
-          sector = sectorP.textContent.trim().replace(/^Sector:\s*/, '').trim();
-          const descP = sibling.querySelector('p.read-more');
-          if (descP) description = decodeHtmlEntities(descP.textContent.replace(/\s+/g, ' ').trim());
+          sector = sectorP.textContent.trim().replace(/^Sector:\s*/i, '').trim();
+          const descNode = sibling.querySelector('p.read-more, div.read-more, p, div');
+          if (descNode) description = decodeHtmlEntities(descNode.textContent.replace(/\s+/g, ' ').trim());
           break;
         }
-        if (sibling.querySelector('a.headText')) break;
+        const nextEntry = Array.from(sibling.querySelectorAll('a')).find(a => scoreTenderAnchor(a) >= 5);
+        if (nextEntry) break;
         sibling = sibling.nextElementSibling;
       }
     }
 
-    if (!sector || !sector.includes('Housing')) continue;
+    if (!sector || !/housing/i.test(sector)) {
+      debugLog('tender-scan', title, 'SKIP_NON_HOUSING_SECTOR', { sector });
+      continue;
+    }
 
-    const clientEl = outerTd.querySelector('span.sourceText a, span.sourceText span');
-    const client   = clientEl ? decodeHtmlEntities(clientEl.textContent.trim()) : '';
+    const clientEl = outerTd.querySelector('span.sourceText a, span.sourceText span, a[style*="#444"], a[style*="color:#444"]');
+    const client = clientEl ? decodeHtmlEntities(clientEl.textContent.trim()) : '';
 
     let value = rawVal.replace(/&pound;/g, '£').replace(/\u00a3/g, '£');
     if (value && value !== '-' && !value.startsWith('£')) value = '£' + value;
 
-    tenders.push({ srNo: srNo++, title, client, value, tenure: '', location, pt, sector, description, matched: false });
+    debugLog('tender-scan', title, 'PICK_TENDER', { client, pt, sector });
+    tenders.push({ srNo: srNo++, title, client, value, tenure, location, pt, sector, description, matched: false, matchScore: 0, bestMatchTitle: '' });
   }
 
   return tenders;
@@ -836,6 +1080,7 @@ function log(msg) {
 
 async function parseBulletin() {
   state.date = document.getElementById('summaryDate').value;
+  resetDebugLog(state.mode);
 
   // ── HTML paste mode ──────────────────────────────────────────────────────
   const htmlTab = document.getElementById('tabHtml').classList.contains('active');
@@ -862,6 +1107,7 @@ async function parseBulletin() {
         document.getElementById('parseBulletinBtn').disabled = false;
         document.getElementById('parseBulletinBtn').textContent = 'Process Bulletin →';
         showStep2Awards();
+        renderDebugPanel();
         return;
       }
 
@@ -879,6 +1125,7 @@ async function parseBulletin() {
       document.getElementById('parseBulletinBtn').disabled = false;
       document.getElementById('parseBulletinBtn').textContent = 'Process Bulletin →';
       showStep2();
+      renderDebugPanel();
     } catch(err) {
       alert('HTML parse error: ' + err.message + '\nFalling back to pre-parsed data.');
       loadFallbackBulletinData();
@@ -897,6 +1144,7 @@ async function parseBulletin() {
     log('No PDF uploaded — using pre-parsed bulletin for 19/03/2026');
     loadFallbackBulletinData();
     showStep2();
+    renderDebugPanel();
     return;
   }
 
@@ -1122,6 +1370,7 @@ function showStep2() {
   document.getElementById('step2-card').classList.remove('hidden');
   document.getElementById('step2-card').scrollIntoView({ behavior:'smooth', block:'start' });
   document.getElementById('bulletinStats').innerHTML = renderBulletinStats(state.bulletinTenders, 'tenders');
+  renderDebugPanel();
   updateStepDots(2);
 }
 
@@ -1133,6 +1382,7 @@ function showStep2Awards() {
   document.getElementById('step2-card').scrollIntoView({ behavior:'smooth', block:'start' });
   document.getElementById('bulletinStats').innerHTML = renderBulletinStats(state.bulletinAwards, 'awards');
   renderAwardsTable();
+  renderDebugPanel();
   document.getElementById('tenderReviewSection').classList.remove('hidden');
   updateStepDots(2);
 }
@@ -1198,37 +1448,53 @@ document.getElementById('xlsxInput').addEventListener('change', function(e) {
 
 function matchTenders() {
   state.matchedTenders = state.bulletinTenders.map(bt => {
-    const titleLower = bt.title.toLowerCase().replace(/[^a-z0-9 ]/g,' ');
     let best = null, bestScore = 0;
     for (const et of state.excelTenders) {
-      const score = titleSimilarity(titleLower, et.title.toLowerCase().replace(/[^a-z0-9 ]/g,' '));
-      if (score > bestScore) { bestScore = score; best = et; }
+      const score = combinedMatchScore(bt, et);
+      if (score > bestScore) {
+        bestScore = score;
+        best = et;
+      }
     }
-    const matched = bestScore > 0.55;
+
+    const matched = bestScore >= 0.58 || (bestScore >= 0.5 && overlapScore(bt.title, best?.title || '') >= 0.7);
+    debugLog('excel-match', bt.title, matched ? 'MATCHED_TO_EXCEL' : 'UNMATCHED_IN_EXCEL', {
+      score: Number(bestScore.toFixed(3)),
+      excelTitle: best ? best.title : '',
+      excelClient: best ? best.client : ''
+    });
+
     return {
       ...bt,
       matched,
+      matchScore: Number(bestScore.toFixed(3)),
+      bestMatchTitle: best ? best.title : '',
       value: matched ? (best.value || bt.value) : bt.value,
       tenure: matched ? (best.tenure || bt.tenure) : bt.tenure,
       location: matched ? (best.location || bt.location) : bt.location,
       client: matched ? (best.client || bt.client) : bt.client,
+      pt: matched ? (best.pt || bt.pt) : bt.pt,
     };
   });
-  const unmatched = state.matchedTenders.filter(t=>!t.matched).length;
-  if (unmatched > 0) {
-    const n = document.getElementById('unmatchedNotice');
+
+  const unmatched = state.matchedTenders.filter(t => !t.matched).length;
+  const lowConfidence = state.matchedTenders.filter(t => t.matched && t.matchScore < 0.7).length;
+  const n = document.getElementById('unmatchedNotice');
+  if (unmatched > 0 || lowConfidence > 0) {
     n.classList.remove('hidden');
-    n.textContent = `⚠ ${unmatched} tender(s) not found in Excel — please fill details manually.`;
+    let msg = '';
+    if (unmatched > 0) msg += `⚠ ${unmatched} tender(s) not found in Excel — please fill details manually.`;
+    if (lowConfidence > 0) msg += `${msg ? ' ' : ''}Review ${lowConfidence} matched tender(s) with lower confidence scores.`;
+    n.textContent = msg;
+  } else {
+    n.classList.add('hidden');
+    n.textContent = '';
   }
+  renderDebugPanel();
 }
 
 function titleSimilarity(a, b) {
-  const wa = new Set(a.split(' ').filter(w=>w.length>3));
-  const wb = new Set(b.split(' ').filter(w=>w.length>3));
-  if (!wa.size) return 0;
-  let common = 0;
-  for (const w of wa) if (wb.has(w)) common++;
-  return common / Math.max(wa.size, wb.size);
+  return overlapScore(a, b);
 }
 
 function renderAwardsTable() {
@@ -1278,7 +1544,7 @@ function renderTenderTable() {
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td><div class="sr-num">${t.srNo}</div></td>
-      <td><span class="match-badge ${t.matched?'match-ok':'match-warn'}">${t.matched?'✓ Excel':'⚠ Manual'}</span></td>
+      <td><span class="match-badge ${t.matched?'match-ok':'match-warn'}">${t.matched ? `✓ Excel (${Math.round((t.matchScore || 0) * 100)}%)` : `⚠ Manual${t.matchScore ? ` (${Math.round(t.matchScore * 100)}%)` : ''}`}</span></td>
       <td style="font-size:11px;font-weight:500;max-width:200px;">${escHtml(t.title)}</td>
       <td><input class="inline-input" value="${escVal(t.client)}" oninput="updateTender(${i},'client',this.value)"></td>
       <td><input class="inline-input" value="${escVal(t.value)}" oninput="updateTender(${i},'value',this.value)" placeholder="e.g. £2.5m"></td>
@@ -1393,7 +1659,7 @@ async function buildAndRenderSummary() {
           'anthropic-dangerous-direct-browser-access': 'true',
         },
         body: JSON.stringify({
-          model: 'claude-opus-4-5',
+          model: 'claude-opus-4-1-20250805',
           max_tokens: 1500,
           system: systemPrompt,
           messages: [{ role: 'user', content: userPrompt }]
@@ -1493,10 +1759,11 @@ function renderApiSummary(text, dateStr, introText, heading) {
   // (doesn't mention a specific tender title or authority)
   let paras = rawParas;
   if (rawParas.length > 1) {
+    const sourceItems = state.mode === 'awards' ? state.bulletinAwards : state.matchedTenders;
     const first = rawParas[0].toLowerCase();
-    const isGenericOpener = !state.matchedTenders.some(t =>
-      first.includes(t.client.toLowerCase().slice(0,10)) ||
-      first.includes(t.title.toLowerCase().slice(0,15))
+    const isGenericOpener = !sourceItems.some(t =>
+      first.includes((t.client || '').toLowerCase().slice(0,10)) ||
+      first.includes((t.title || '').toLowerCase().slice(0,15))
     );
     if (isGenericOpener) paras = rawParas.slice(1);
   }
