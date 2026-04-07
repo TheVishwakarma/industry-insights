@@ -17,11 +17,12 @@
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:var(--font-ui);background:var(--c-bg);color:var(--c-text);min-height:100vh;line-height:1.6;}
-  .header{background:var(--c-accent);color:white;padding:18px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.15);}
-  .header-left{display:flex;align-items:center;gap:12px;}
-  .header-logo{width:34px;height:34px;background:rgba(255,255,255,.2);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:17px;font-weight:700;color:white;}
-  .header-title{font-size:16px;font-weight:600;}
-  .header-sub{font-size:11px;opacity:.7;margin-top:1px;}
+  .header{background:#1a7a1a;color:white;padding:14px 28px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:100;box-shadow:0 2px 8px rgba(0,0,0,.2);}
+  .header-left{display:flex;align-items:center;gap:14px;}
+  .header-logo{height:32px;display:flex;align-items:center;}
+  .header-logo svg{height:32px;width:auto;}
+  .header-title{font-size:20px;font-weight:800;letter-spacing:.02em;text-transform:uppercase;}
+  .header-sub{font-size:11px;opacity:.75;margin-top:2px;letter-spacing:.04em;}
   .header-steps{display:flex;gap:5px;align-items:center;}
   .step-dot{width:26px;height:26px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;background:rgba(255,255,255,.15);color:rgba(255,255,255,.55);}
   .step-dot.active{background:white;color:var(--c-accent);}
@@ -102,10 +103,16 @@
 
 <div class="header">
   <div class="header-left">
-    <div class="header-logo">T</div>
+    <div class="header-logo">
+      <!-- Locarla wordmark in white -->
+      <svg viewBox="0 0 180 40" xmlns="http://www.w3.org/2000/svg" fill="white">
+        <text x="0" y="32" font-family="Arial,Helvetica,sans-serif" font-weight="900" font-size="36" letter-spacing="1">LOCARLA</text>
+      </svg>
+    </div>
+    <div style="width:1px;height:32px;background:rgba(255,255,255,.3);margin:0 4px;"></div>
     <div>
       <div class="header-title">Daily Summary Tool</div>
-      <div class="header-sub">Locarla · Social Housing UK</div>
+      <div class="header-sub">Social Housing UK · Industry Insights</div>
     </div>
   </div>
   <div class="header-steps">
@@ -138,14 +145,14 @@
     <span class="pill pill-amber">⚠ Prof Svcs: Architect &amp; Surveyor / EPC / Fire Risk only</span>
   </div>
 
-  <!-- Input tabs -->
-  <div style="display:flex;gap:0;border:1px solid var(--c-border-dark);border-radius:var(--radius);overflow:hidden;margin-bottom:14px;width:fit-content;" id="inputTabsRow">
-    <button class="toggle-tab active" id="tabPdf"  onclick="switchInputTab('pdf')">📄 Upload PDF</button>
-    <button class="toggle-tab"        id="tabHtml" onclick="switchInputTab('html')">🌐 Paste HTML Source</button>
+  <!-- Input tabs hidden — HTML source only for now -->
+  <div id="inputTabsRow" style="display:none;">
+    <button class="toggle-tab" id="tabPdf"  onclick="switchInputTab('pdf')">📄 Upload PDF</button>
+    <button class="toggle-tab active" id="tabHtml" onclick="switchInputTab('html')">🌐 Paste HTML Source</button>
   </div>
 
-  <!-- PDF panel -->
-  <div id="panelPdf">
+  <!-- PDF panel (hidden — future feature) -->
+  <div id="panelPdf" style="display:none;">
     <div class="upload-zone" id="pdfZone" onclick="document.getElementById('pdfInput').click()">
       <div class="upload-icon">📄</div>
       <div class="upload-label"><strong>Click to upload</strong> the HousingNet Bulletin PDF<br>or drag and drop here</div>
@@ -155,8 +162,8 @@
     <div class="pdf-log" id="pdfLog"></div>
   </div>
 
-  <!-- HTML panel -->
-  <div id="panelHtml" style="display:none;">
+  <!-- HTML panel — always visible -->
+  <div id="panelHtml">
     <div style="font-size:12px;color:var(--c-text-muted);margin-bottom:8px;line-height:1.6;">
       While logged into Locarla, open the bulletin page → press <strong>Ctrl+U</strong> → <strong>Ctrl+A</strong> → <strong>Ctrl+C</strong> → paste below.
     </div>
@@ -290,6 +297,7 @@ let rotationSeed = 0;
   document.getElementById('summaryDate').value = d.toISOString().split('T')[0];
   state.date = d.toISOString().split('T')[0];
   loadApiKey();
+  switchInputTab('html'); // always start with HTML paste
 })();
 
 // ─── Utilities ────────────────────────────────────────────────────────────────
@@ -385,12 +393,11 @@ function switchMode(mode){
     document.getElementById('modePills').innerHTML=`
       <span class="pill pill-green">✓ Sector: Housing</span>
       <span class="pill pill-green">✓ Tender Alerts section only</span>
-      <span class="pill pill-red">✗ Titles starting: CDE / Additional Information / Modification Notice / Cancelled</span>
+      <span class="pill pill-red">✗ Titles starting: AIN / CDE / Additional Information / Modification Notice / Cancelled</span>
       <span class="pill pill-red">✗ Category: Materials / Other Daily Tenders</span>
       <span class="pill pill-amber">⚠ FM: Hard FM / Mould / Damp only</span>
       <span class="pill pill-amber">⚠ Prof Svcs: Architect &amp; Surveyor / EPC / Fire Risk only</span>`;
-    document.getElementById('inputTabsRow').style.display='';
-    switchInputTab('pdf');
+    switchInputTab('html');
   } else {
     document.getElementById('modeNotice').textContent='Awards are extracted from the Contracts Awarded section of the Bulletin, then matched to the CANs Excel. Only Housing-sector Awarded contracts (UK7 or blank) are included.';
     document.getElementById('modePills').innerHTML=`
@@ -407,10 +414,11 @@ function switchMode(mode){
   }
 }
 function switchInputTab(tab){
-  document.getElementById('panelPdf').style.display  = tab==='pdf' ?'':'none';
-  document.getElementById('panelHtml').style.display = tab==='html'?'':'none';
-  document.getElementById('tabPdf').classList.toggle('active', tab==='pdf');
-  document.getElementById('tabHtml').classList.toggle('active',tab==='html');
+  // PDF tab hidden for now — always use HTML paste
+  document.getElementById('panelPdf').style.display  = 'none';
+  document.getElementById('panelHtml').style.display = '';
+  document.getElementById('tabPdf').classList.remove('active');
+  document.getElementById('tabHtml').classList.add('active');
 }
 function switchSummaryTab(tab){
   document.getElementById('tabVisual').classList.toggle('active',tab==='visual');
@@ -741,44 +749,15 @@ async function parseBulletin(){
       ps.style.display=''; ps.textContent=`✓ ${awards.length} Housing awards found in bulletin`;
       showStep2('awards');
     } else {
-      // Tenders mode
-      if(document.getElementById('tabHtml').classList.contains('active')){
-        const html=document.getElementById('htmlPasteArea').value.trim();
-        if(!html||html.length<500){alert('Please paste the bulletin HTML source first.');return;}
-        const tenders=extractTendersFromHTML(html);
-        if(tenders.length===0){alert('No Housing tenders found. Please paste the full bulletin source (Ctrl+U).');return;}
-        state.bulletinTenders=tenders;
-        const ps=document.getElementById('htmlParseStatus');
-        ps.style.display=''; ps.textContent=`✓ ${tenders.length} Housing tenders found in bulletin`;
-        showStep2('tenders');
-      } else {
-        const pdfInput=document.getElementById('pdfInput');
-        if(!pdfInput.files||!pdfInput.files.length){alert('Please upload a bulletin PDF first.');return;}
-        document.getElementById('pdfLog').textContent='';
-        const ab=await pdfInput.files[0].arrayBuffer();
-        const pdf=await pdfjsLib.getDocument({data:ab}).promise;
-        plog(`PDF loaded: ${pdf.numPages} pages`);
-        let pages=[];
-        for(let i=1;i<=pdf.numPages;i++){
-          const page=await pdf.getPage(i);
-          const content=await page.getTextContent();
-          let pt='',prevY=null;
-          for(const item of content.items){
-            if(prevY!==null&&Math.abs(item.transform[5]-prevY)>5) pt+='\n';
-            else if(pt&&!pt.endsWith(' ')&&!pt.endsWith('\n')) pt+=' ';
-            pt+=item.str; prevY=item.transform[5];
-          }
-          pages.push(pt);
-        }
-        plog('Extracting tenders…');
-        const tenders=extractTendersFromText(pages);
-        state.bulletinTenders=tenders;
-        plog(`Found: ${tenders.length}`);
-        const broken=tenders.filter(t=>t.title.length<15||!t.title.includes(' ')).length;
-        if(tenders.length===0||broken>tenders.length/2){plog('Unreliable — loading fallback');loadFallback();}
-        document.getElementById('pdfStatus').textContent=`✓ ${pdfInput.files[0].name} parsed`;
-        showStep2('tenders');
-      }
+      // Tenders mode — always HTML paste
+      const html=document.getElementById('htmlPasteArea').value.trim();
+      if(!html||html.length<500){alert('Please paste the bulletin HTML source first (Ctrl+U on the bulletin page → Ctrl+A → Ctrl+C → paste here).');return;}
+      const tenders=extractTendersFromHTML(html);
+      if(tenders.length===0){alert('No Housing tenders found. Please paste the full bulletin source (Ctrl+U).');return;}
+      state.bulletinTenders=tenders;
+      const ps=document.getElementById('htmlParseStatus');
+      ps.style.display=''; ps.textContent=`✓ ${tenders.length} Housing tenders found in bulletin`;
+      showStep2('tenders');
     }
   }catch(err){
     alert('Parse error: '+err.message);
@@ -862,7 +841,7 @@ function renderAwardsTable(){
     tr.innerHTML=`
       <td><div class="sr-num">${a.srNo}</div></td>
       <td><span class="match-badge ${a.matched?'match-ok':'match-warn'}">${a.matched?'✓ Excel':'⚠ Manual'}</span></td>
-      <td style="font-size:11px;font-weight:500;max-width:200px;">${escHtml(a.title)}</td>
+      <td><textarea class="desc-input" style="min-height:38px;font-weight:500;" oninput="ua(${i},'title',this.value)">${escHtml(a.title)}</textarea></td>
       <td><input class="inline-input" value="${escVal(a.client)}"   oninput="ua(${i},'client',this.value)"></td>
       <td><input class="inline-input" value="${escVal(a.winner)}"   oninput="ua(${i},'winner',this.value)" placeholder="Winner name"></td>
       <td><input class="inline-input" value="${escVal(a.value)}"    oninput="ua(${i},'value',this.value)"  placeholder="£1.2m"></td>
@@ -888,30 +867,37 @@ function renderTendersTable(){
     <th style="min-width:80px;">Value</th>
     <th style="min-width:55px;">Tenure</th>
     <th style="min-width:100px;">Location</th>
-    <th style="min-width:160px;">Description</th></tr>`;
+    <th style="min-width:160px;">Description</th>
+    <th style="width:32px;"></th></tr>`;
   const tb=document.getElementById('reviewTableBody'); tb.innerHTML='';
   state.matchedTenders.forEach((t,i)=>{
     const tr=document.createElement('tr');
     tr.innerHTML=`
       <td><div class="sr-num">${t.srNo}</div></td>
       <td><span class="match-badge ${t.matched?'match-ok':'match-warn'}">${t.matched?'✓ Excel':'⚠ Manual'}</span></td>
-      <td style="font-size:11px;font-weight:500;max-width:200px;">${escHtml(t.title)}</td>
+      <td><textarea class="desc-input" style="min-height:38px;font-weight:500;" oninput="ut(${i},'title',this.value)">${escHtml(t.title)}</textarea></td>
       <td><input class="inline-input" value="${escVal(t.client)}"   oninput="ut(${i},'client',this.value)"></td>
       <td><input class="inline-input" value="${escVal(t.value)}"    oninput="ut(${i},'value',this.value)"  placeholder="£2.5m"></td>
       <td><input class="inline-input" value="${escVal(t.tenure)}"   oninput="ut(${i},'tenure',this.value)" placeholder="months"></td>
       <td><input class="inline-input" value="${escVal(t.location)}" oninput="ut(${i},'location',this.value)"></td>
-      <td><textarea class="desc-input" oninput="ut(${i},'description',this.value)">${escHtml(t.description)}</textarea></td>`;
+      <td><textarea class="desc-input" oninput="ut(${i},'description',this.value)">${escHtml(t.description)}</textarea></td>
+      <td><button onclick="deleteTender(${i})" style="background:none;border:none;cursor:pointer;color:var(--c-red);font-size:16px;padding:4px 6px;" title="Remove tender">✕</button></td>`;
     tb.appendChild(tr);
   });
 }
 function ut(i,f,v){state.matchedTenders[i][f]=v;}
+function deleteTender(i){
+  state.matchedTenders.splice(i,1);
+  state.matchedTenders.forEach((t,j)=>t.srNo=j+1);
+  renderTendersTable();
+}
 
 function addManualRow(){
   if(state.mode==='awards'){
-    state.matchedAwards.push({srNo:state.matchedAwards.length+1,title:'New Award',client:'',winner:'',value:'',tenure:'',location:'',pt:'',description:'',matched:false});
+    state.matchedAwards.push({srNo:state.matchedAwards.length+1,title:'',client:'',winner:'',value:'',tenure:'',location:'',pt:'',description:'',matched:false});
     renderAwardsTable();
   } else {
-    state.matchedTenders.push({srNo:state.matchedTenders.length+1,title:'New Tender',client:'',value:'',tenure:'',location:'',pt:'',description:'',matched:false,manual:true});
+    state.matchedTenders.push({srNo:state.matchedTenders.length+1,title:'',client:'',value:'',tenure:'',location:'',pt:'',description:'',matched:false,manual:true});
     renderTendersTable();
   }
   document.querySelector('.table-wrapper-inner').scrollTop=99999;
